@@ -174,7 +174,9 @@ locktestthread(void *junk, unsigned long num)
 	for (i=0; i<NLOCKLOOPS; i++) {
 		kprintf_t(".");
 		KASSERT(!(lock_do_i_hold(testlock)));
+		// KASSERT(1==0);
 		lock_acquire(testlock);
+		
 		KASSERT(lock_do_i_hold(testlock));
 		random_yielder(4);
 
@@ -274,7 +276,6 @@ locktest(int nargs, char **args)
 	}
 	spinlock_init(&status_lock);
 	test_status = TEST161_SUCCESS;
-
 	for (i=0; i<NTHREADS; i++) {
 		kprintf_t(".");
 		result = thread_fork("synchtest", NULL, locktestthread, NULL, i);
@@ -465,14 +466,15 @@ void
 cvtestthread(void *junk, unsigned long num)
 {
 	(void)junk;
-
 	int i;
 	volatile int j;
 	struct timespec ts1, ts2;
 
 	for (i=0; i<NCVLOOPS; i++) {
 		kprintf_t(".");
+
 		lock_acquire(testlock);
+		
 		while (testval1 != num) {
 			testval2 = 0;
 			random_yielder(4);
@@ -496,7 +498,7 @@ cvtestthread(void *junk, unsigned long num)
 			testval2 = 0xFFFFFFFF;
 		}
 		testval2 = num;
-
+		
 		/*
 		 * loop a little while to make sure we can measure the
 		 * time waiting on the cv.
@@ -504,12 +506,14 @@ cvtestthread(void *junk, unsigned long num)
 		for (j=0; j<3000; j++);
 
 		random_yielder(4);
+		// KASSERT(1==0);
 		cv_broadcast(testcv, testlock);
 		random_yielder(4);
 		failif((testval1 != testval2));
-
+		
 		kprintf_n("Thread %lu\n", testval2);
 		testval1 = (testval1 + NTHREADS - 1) % NTHREADS;
+		
 		lock_release(testlock);
 	}
 	V(donesem);
@@ -522,8 +526,8 @@ cvtest(int nargs, char **args)
 	(void)args;
 
 	int i, result;
-
 	kprintf_n("Starting cvt1...\n");
+	
 	for (i=0; i<CREATELOOPS; i++) {
 		kprintf_t(".");
 		testlock = lock_create("testlock");
@@ -538,29 +542,35 @@ cvtest(int nargs, char **args)
 		if (donesem == NULL) {
 			panic("cvt1: sem_create failed\n");
 		}
+		
 		if (i != CREATELOOPS - 1) {
 			lock_destroy(testlock);
 			cv_destroy(testcv);
 			sem_destroy(donesem);
 		}
 	}
+	
 	spinlock_init(&status_lock);
 	test_status = TEST161_SUCCESS;
-
+	
 	testval1 = NTHREADS-1;
+	
 	for (i=0; i<NTHREADS; i++) {
+		
 		kprintf_t(".");
 		result = thread_fork("cvt1", NULL, cvtestthread, NULL, (long unsigned) i);
 		if (result) {
 			panic("cvt1: thread_fork failed: %s\n", strerror(result));
 		}
 	}
+	
 	for (i=0; i<NTHREADS; i++) {
 		kprintf_t(".");
 		P(donesem);
 	}
-
+	
 	lock_destroy(testlock);
+	
 	cv_destroy(testcv);
 	sem_destroy(donesem);
 	testlock = NULL;
