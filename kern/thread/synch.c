@@ -154,6 +154,7 @@ lock_create(const char *name)
 		return NULL;
 	}
 
+	// Create a 'wait channel' to keep sleeping threads in. 
 	lock->lk_wchan = wchan_create(lock->lk_name);
 	if (lock->lk_wchan == NULL) {
 		kfree(lock->lk_name);
@@ -161,8 +162,13 @@ lock_create(const char *name)
 		return NULL;
 	}
 
+	// Initialise a spinlock to handle atomic processes.
 	spinlock_init(&lock->lk_slock);
+
+	// Initialise acquisition staus to false;
 	lock->acquired = false;
+
+	// Not entirely sure what this does, came with skeleton.. 
 	HANGMAN_LOCKABLEINIT(&lock->lk_hangman, lock->lk_name);
 
 	return lock;
@@ -187,7 +193,7 @@ lock_acquire(struct lock *lock)
 	// Assert current thread does not already hold lock.
 	KASSERT(!lock_do_i_hold(lock));
 	
-	// Use spinlocks to manage critical section. 
+	// Use built-in spinlocks to manage critical section. 
 	spinlock_acquire(&lock->lk_slock);
 	
 	/* Call this (atomically) before waiting for a lock */
@@ -197,7 +203,8 @@ lock_acquire(struct lock *lock)
 	while (lock->acquired) {
 		wchan_sleep(lock->lk_wchan, &lock->lk_slock);
 	}
-	// Assign current thread
+	/* When awoken */
+	// Assign current thread & update lock acquired status.
 	lock->lk_thread = curthread;
 	lock->acquired = true;
 	
@@ -211,16 +218,21 @@ void
 lock_release(struct lock *lock)
 {
 	KASSERT(lock != NULL);
+
+	// Assert current thread does not already hold lock.
 	KASSERT(lock_do_i_hold(lock));
 
+	// Use built-in spinlocks to manage critical section. 
 	spinlock_acquire(&lock->lk_slock);
 
+	// Clear thread from lock & update acquired status.
 	lock->lk_thread = NULL;
 	lock->acquired = false;
 
-		/* Call this (atomically) when the lock is released */
+	/* Call this (atomically) when the lock is released */
 	HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
 
+	// Built-in function to wake one sleeping thread.
 	wchan_wakeone(lock->lk_wchan, &lock->lk_slock);
 	
 	spinlock_release(&lock->lk_slock);
@@ -230,6 +242,7 @@ bool
 lock_do_i_hold(struct lock *lock)
 {
 	KASSERT(lock != NULL);
+	// Check that lock is acquired by the current thread (global variable).
 	return (lock->acquired) && (curthread == lock->lk_thread);
 }
 
@@ -254,6 +267,7 @@ cv_create(const char *name)
 		return NULL;
 	}
 
+	// Create a 'wait channel' to keep sleeping threads in. 
 	cv->cv_wchan = wchan_create(cv->cv_name);
 	if (cv->cv_wchan == NULL) {
 		kfree(cv->cv_name);
@@ -261,6 +275,7 @@ cv_create(const char *name)
 		return NULL;
 	}
 
+	// Initialise a spinlock to handle atomic processes.
 	spinlock_init(&cv->cv_slock);
 
 	return cv;
@@ -285,14 +300,20 @@ cv_wait(struct cv *cv, struct lock *lock)
 	// Assert that the current thread holds the lock passed.
 	KASSERT(lock_do_i_hold(lock));
 
+	// Use built-in spinlocks to manage critical section. 
 	spinlock_acquire(&cv->cv_slock);
 
+	// Release lock and put thread to sleep
 	lock_release(lock);
 	wchan_sleep(cv->cv_wchan, &cv->cv_slock);
 
 	spinlock_release(&cv->cv_slock);
+	
+	/* Must acquire lock after releasing spinlock to prevent 
+	2 x spinlock acquisition */
 	lock_acquire(lock);
 	
+	// Saftey assertion to check current thread holds lock again.
 	KASSERT(lock_do_i_hold(lock));
 }
 
@@ -304,9 +325,13 @@ cv_signal(struct cv *cv, struct lock *lock)
 	
 	// Assert that the current thread holds the lock passed.
 	KASSERT(lock_do_i_hold(lock));
-	
+
+	// Use built-in spinlocks to manage critical section. 
 	spinlock_acquire(&cv->cv_slock);
+
+	// Wake one sleeping thread.
 	wchan_wakeone(cv->cv_wchan, &cv->cv_slock);
+
 	spinlock_release(&cv->cv_slock);
 }
 
@@ -318,7 +343,11 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 	// Assert that the current thread holds the lock passed.
 	KASSERT(lock_do_i_hold(lock));
 	
+	// Use built-in spinlocks to manage critical section. 
 	spinlock_acquire(&cv->cv_slock);
+
+	// Wake all sleeping threads.
 	wchan_wakeall(cv->cv_wchan, &cv->cv_slock);
+
 	spinlock_release(&cv->cv_slock);
 }
